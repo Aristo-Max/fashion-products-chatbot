@@ -133,7 +133,7 @@ const Chatmessage = ({ role, text, image = [], price = [] }) => {
                           justifyContent: 'center',
                         }}
                       >
-                        Price: {productPrice !== 'N/A' ? `$${productPrice}` : 'N/A'}
+                        Price: {productPrice !== 'N/A' ? `${productPrice}` : 'N/A'}
                       </div>
                     </div>
                     <a
@@ -161,7 +161,7 @@ const Chatmessage = ({ role, text, image = [], price = [] }) => {
         </div>
 
         {/* Left Arrow */}
-        {showLeftArrow && (
+        {images.length > 2 &&showLeftArrow && (
           <button
             onClick={() => handleScroll('left')}
             style={{
@@ -187,7 +187,7 @@ const Chatmessage = ({ role, text, image = [], price = [] }) => {
         )}
 
         {/* Right Arrow */}
-        {showRightArrow && (
+        {images.length > 2 && showRightArrow && (
           <button
             onClick={() => handleScroll('right')}
             style={{
@@ -216,7 +216,7 @@ const Chatmessage = ({ role, text, image = [], price = [] }) => {
     );
   };
 
-  const renderContent = () => {
+const renderContent = () => {
     const cleanedText =
       typeof text === 'string'
         ? text
@@ -224,14 +224,16 @@ const Chatmessage = ({ role, text, image = [], price = [] }) => {
             .replace(/price:\s*([\d.]+)/gi, '')
             .trim()
         : '';
-
+  
+    const textLines = cleanedText.split('\n').filter(line => line.trim() !== '');
+  
     return (
       <>
-        {cleanedText && <p>{cleanedText}</p>}
-        {images.length > 0 && renderImageGrid()}
-      </>
-    );
-  };
+        {textLines.map((line, idx) => (
+          <p key={idx} style={{ marginBottom: '6px' }}>{line}</p>
+        ))}
+        {images.length > 0 && renderImageGrid()}</>
+);};
 
   return (
     <div className={`message ${role === 'user' ? 'user-message' : 'bot-message'}`}>

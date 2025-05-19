@@ -94,7 +94,7 @@ const App = () => {
         <header className="header-container">
           <div className="logo-section">
             <img src={logo} alt="AristoMax Logo" className="company-logo" />
-            <h1 className="gradient-header">clothes E-commerce </h1>
+            <h1 className="gradient-header">Ecommerce - Clothing </h1>
           </div>
           <div className="blue-bar"></div>
         </header>

@@ -73,86 +73,63 @@ async def generate_response(request: PromptRequest, collection=Depends(get_chrom
     try:
         logger.info(f"Processing request for session_id: {request.session_id}")
 
-        # Validate chat_history format
         valid_roles = {"user", "assistant", "system"}
         for msg in request.chat_history:
             if not all(key in msg for key in ["role", "content"]) or msg["role"] not in valid_roles:
                 raise HTTPException(status_code=400, detail="Invalid chat_history format")
 
-        # Limit chat history to last 10 messages
-        max_history_length = 10
-        limited_history = request.chat_history[-max_history_length:]
+        limited_history = request.chat_history[-10:]
 
-        # Query ChromaDB for relevant products
         try:
-            results = collection.query(
-                query_texts=[request.prompt],
-                n_results=5
-            )
+            results = collection.query(query_texts=[request.prompt], n_results=30)
             if not results["documents"] or not results["documents"][0]:
                 logger.info("No products found for query")
-                product_ids = []
-                product_names = []
+                product_ids, product_names = [], []
+                product_seq_ids = []
             else:
-                product_ids = results["ids"][0]
-                product_names = [metadata.get("name", "") for metadata in results["metadatas"][0]]
+                metadatas = results["metadatas"][0]
+                product_seq_ids = [str(meta.get("seq_id", "")) for meta in metadatas]
+                product_names = [meta.get("name", "") for meta in metadatas]
+                product_ids = product_seq_ids
                 logger.info(f"Found {len(product_ids)} products")
         except Exception as e:
             logger.error(f"ChromaDB query error: {e}")
-            product_ids = []
-            product_names = []
+            product_ids, product_names, product_seq_ids = [], [], []
 
-        # Prepare product string to send to GPT (only use product names)
-        product_string = "Available products (suggest only when appropriate):\n"
-        for pid, name in zip(product_ids, product_names):
+        product_string = "Available products (select up to 4 relevant ones):\n"
+        for pid, name in zip(product_seq_ids, product_names):
             product_string += f"{pid}. {name}\n"
 
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                "You are a polite and empathetic chatbot specializing in CLOTHING and fashion advice."
-                # "⚠️ When a user says more, show me more, any other?, or similar phrases asking for additional options, continue suggesting **up to 4 more products** that match the **SAME COLOR and STYLE** previously discussed." 
+        logger.info(f"Product string sent to GPT:\n{product_string}")
+
+        system_prompt = (
+                "You are a polite and empathetic chatbot specializing in clothing and fashion advice. "
                 "Your primary goal is to understand the user's preferences — such as clothing type, preferred colors, occasion, style (e.g., casual, formal, ethnic), and any fabric sensitivities — before offering product suggestions. "
                 "If the user's query is vague or lacks sufficient context, ask polite follow-up questions to clarify. "
                 "You may also recommend products that are relevant based on their description, brand, or color, even if the user doesn't explicitly mention them. "
-                "You can only suggest products for women. If someone asks for men's or kids' products, politely respond that YOU CAN ONLY RECOMMED WOMEN'S clothing. "
-                "You MUST only recommend products that are present in the provided data. Do not recommend any product outside the provided data under any circumstances. "
+                "You can only suggest products for women. If someone asks for men's or kids' products, politely respond that you can only recommend women's clothing. "
+                "You must only recommend products that are present in the provided data. Do not recommend any product outside the provided data under any circumstances. "
                 "Do not give any extra information unless the user explicitly asks for it.\n\n"
-                "DO NOT provide any other COLORS OR STYLES  product unless the user explicitly asks for them. "
-                "YOU MUST PROVIDE CORRECT COLOR and BRAND and STYLE of the product. which user is asking for.\n\n"
 
                 "⚠️ When you are ready to recommend products, strictly follow this EXACT format for EACH item:\n"
-                "You are a helpful, friendly, and accurate fashion assistant. Your job is to suggest up to 4 women's fashion products based ONLY on the data provided.\n\n"
-
-                "✅ Response Format:\n"
-                "- Start with a polite line like: 'Thank you for your query!' or 'I'm here to help you!'\n"
-                "- Then say: 'Here are some options for [item]:'\n"
-                "- If only one product is returned, list it without a number.\n"
-                "- List up to 4 products as: \"<number>. <Product Name>.\" Product ID: <numeric_id>(one per line).\n"
-                "- Do not repeat the intro for each product.\n"
-                "- Do not mention images; the frontend will display them from metadata.\n\n"
-
-               
+                "Line 1: Here is a recommended product:\n"
+                "Line 2: <Product Name>\n"
+                "Line 3: Product ID: <numeric_id> (⚠️ Must be copied EXACTLY from the list below)\n\n"
 
                 "⚠️ Important rules:\n"
                 "- Recommend a maximum of 4 products.\n"
-                "- ❌ If you cannot find a matching Product ID from the list, do NOT suggest that product.\n"
-                "- ❌ Do not guess or invent Product IDs.\n"
-
                 "- Do NOT add any extra descriptions, bullet points, or formatting.\n"
                 "- NEVER suggest a product without including its Product ID. If you cannot find an appropriate Product ID, do not suggest that product at all.\n"
                 "- ❌ If you suggest products without a Product ID, your response will be rejected.\n"
-                "- ❌ Do NOT suggest any product that is not present in the provided data.\n"
+                "- ❌ strictly follow this Do NOT suggest any product that is not present in the provided data.\n"
                 "- ❌ Do NOT suggest any product for men or kids. Only recommend products for women.\n"
                 "- ❌ Do NOT provide any extra information unless the user asks for it explicitly.\n\n"
 
                 f"{product_string}"
-                )
-            }
-        ] + limited_history + [{"role": "user", "content": request.prompt}]
+        )
 
-        # Generate response with OpenAI
+        messages = [{"role": "system", "content": system_prompt}] + limited_history + [{"role": "user", "content": request.prompt}]
+
         try:
             client = openai.OpenAI(api_key=OPENAI_API_KEY)
             response = client.chat.completions.create(
@@ -166,25 +143,25 @@ async def generate_response(request: PromptRequest, collection=Depends(get_chrom
             logger.error(f"OpenAI API error: {e}")
             raise HTTPException(status_code=500, detail="Error communicating with the AI model")
 
-       # Extract Product IDs in format: Product ID: 123
-        matched_ids = re.findall(r'Product ID:\s*(\d{1,6})', response_text)
+        matched_ids = re.findall(r'Product ID:\s*(\d{1,6})', response_text)[:4]
         logger.info(f"Extracted product IDs from GPT response: {matched_ids}")
 
-        # Fetch product metadata from ChromaDB
+        if not matched_ids:
+            logger.info("GPT response did not include any valid Product IDs.")
+            return {
+                "response": response_text.strip(),
+                "products": []
+            }
+
         matched_products = []
-        if matched_ids:
-            try:
-                products_data = collection.get(ids=[str(pid) for pid in matched_ids])
-                for metadata in products_data.get("metadatas", []):
-                    matched_products.append(metadata)
-            except Exception as e:
-                logger.error(f"Failed to fetch matched products from ChromaDB: {e}")
+        try:
+            products_data = collection.get(ids=matched_ids)
+            matched_products = products_data.get("metadatas", [])
+        except Exception as e:
+            logger.error(f"Error fetching product metadata: {e}")
 
-        # Remove product IDs from GPT response before sending to frontend
         cleaned_response = re.sub(r'\n?Product ID:\s*\d{1,6}', '', response_text).strip()
-        cleaned_response = re.sub(r'\n?\s*Product ID:.*', '', response_text)
 
-        # Return GPT response and relevant product metadata
         return {
             "response": cleaned_response,
             "products": matched_products

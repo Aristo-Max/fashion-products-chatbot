@@ -227,7 +227,7 @@ h1 {
   border-radius: 5px;
   resize: none; /* Prevent manual resizing */
   overflow-y: hidden; /* Hide scrollbar by default */
-  max-height: 4.5em; /* Limit height to 3 lines (1.5em per line) */
+  max-height: 3em; /* Limit height to 3 lines (1.5em per line) */
   line-height: 1.5; /* Set line height */
   font-size: 1rem; /* Adjust font size */
   white-space: pre-wrap; /* Preserve line breaks */
